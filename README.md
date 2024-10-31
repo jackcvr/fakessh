@@ -1,9 +1,9 @@
 # Fake SSH with features
 
-## Requirements
+## Requirements (optional)
 
-- optional: `apt install ufw at` - for jailing and releasing bots by IPs 
-- optional: AbuseIPDB key - for logging extended information about intruders
+- `apt install ufw at` - for jailing and releasing bots by IPs
+- AbuseIPDB key - for logging extended information about intruders
 
 ## Preparation
 
