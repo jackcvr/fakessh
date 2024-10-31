@@ -1,0 +1,10 @@
+[Unit]
+Description=Fake SSH Server
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/fakessh -c /etc/fakessh/fakessh.toml
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

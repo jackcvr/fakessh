@@ -1,0 +1,6 @@
+verbose = false
+bind = "0.0.0.0:22"
+timeout = 300
+max_attempts = 3
+jail_duration = "1 day"
+abuseipdb_key = ""
