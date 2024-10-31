@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -71,7 +70,7 @@ func main() {
 	slog.SetDefault(logger)
 
 	ssh.Handle(func(sess ssh.Session) {
-		defer catch(func(err error) {
+		defer Catch(func(err error) {
 			slog.Error(err.Error())
 		})
 		start := time.Now()
@@ -106,46 +105,46 @@ func main() {
 			if out, err := exec.Command("ufw", "deny", "from", ip).CombinedOutput(); err != nil {
 				slog.Error("exec", "error", string(out))
 			}
-			cleanupCmd := fmt.Sprintf(`echo "ufw delete deny from %s" | at now + %s`, ip, config.JailDuration)
-			if out, err := exec.Command("/bin/sh", "-c", cleanupCmd).CombinedOutput(); err != nil {
+			releaseCmd := fmt.Sprintf(`echo "ufw delete deny from %s" | at now + %s`, ip, config.JailDuration)
+			if out, err := exec.Command("/bin/sh", "-c", releaseCmd).CombinedOutput(); err != nil {
 				slog.Error("exec", "error", string(out))
 			}
-			slog.Info("ban", "ip", ip, "term", config.JailDuration)
+			slog.Info("jailed", "ip", ip, "term", config.JailDuration)
 		}
 
 		if cmd != "" {
 			cmd0 := sess.Command()[0]
 			resp := makeResponse(cmd0)
-			try(sess.Write([]byte(resp)))
+			Try(sess.Write([]byte(resp)))
 			slog.Debug("cmd", "sent", resp)
 			return
 		} else {
-			try(sess.Write([]byte(WelcomeMessage + Prompt)))
+			Try(sess.Write([]byte(WelcomeMessage + Prompt)))
 		}
 
 		if cmd == "" {
 			go func() {
-				defer catch(func(err error) {
+				defer Catch(func(err error) {
 					slog.Debug(err.Error())
 				})
 				input := make([]byte, 0, 1024)
 				buf := []byte{0}
 				for {
-					if isDone(ctx) {
+					if IsDone(ctx) {
 						return
 					}
-					try(sess.Read(buf))
+					Try(sess.Read(buf))
 					input = append(input, buf...)
-					try(sess.Write(buf))
+					Try(sess.Write(buf))
 					if buf[0] == 13 {
-						try(sess.Write([]byte("\n")))
+						Try(sess.Write([]byte("\n")))
 						rawCmd := strings.TrimSpace(string(input))
 						slog.Info("input",
 							"addr", sess.RemoteAddr(),
 							"cmd", rawCmd)
 						cmd0 := strings.SplitN(rawCmd, " ", 2)[0]
 						resp := makeResponse(cmd0)
-						try(sess.Write([]byte(resp + Prompt)))
+						Try(sess.Write([]byte(resp + Prompt)))
 						slog.Debug("output", "cmd", resp)
 						input = input[:0]
 					}
@@ -177,15 +176,6 @@ func makeResponse(cmd string) string {
 		resp = fmt.Sprintf("%s: command not found\n", cmd)
 	}
 	return resp
-}
-
-func isDone(ctx context.Context) bool {
-	select {
-	case <-ctx.Done():
-		return true
-	default:
-		return false
-	}
 }
 
 func getIPInfo(ip string) (map[string]any, error) {
