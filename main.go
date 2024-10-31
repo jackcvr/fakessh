@@ -30,6 +30,7 @@ var (
 	configPath   = "/etc/fakessh/fakessh.toml"
 	cmdResponses = map[string]string{
 		"uname": "Linux\n",
+		"echo":  "SSH check\n",
 	}
 )
 
@@ -87,18 +88,20 @@ func main() {
 		ip := strings.SplitN(sess.RemoteAddr().String(), ":", 2)[0]
 		if _, ok := attempts[ip]; !ok {
 			attempts[ip] = 0
-			go func() {
-				info, err := getIPInfo(ip)
-				if err != nil {
-					slog.Error(err.Error())
-					return
-				}
-				slog.Info("info", "ip", ip, "data", info["data"])
-			}()
+			if config.AbuseIPDBKey != "" {
+				go func() {
+					info, err := getIPInfo(ip)
+					if err != nil {
+						slog.Error(err.Error())
+						return
+					}
+					slog.Info("info", "ip", ip, "data", info["data"])
+				}()
+			}
 		}
 		attempts[ip] += 1
 
-		if attempts[ip] >= config.MaxAttempts {
+		if attempts[ip] >= config.MaxAttempts && config.JailDuration != "" {
 			attempts[ip] = 0
 			if out, err := exec.Command("ufw", "deny", "from", ip).CombinedOutput(); err != nil {
 				slog.Error("exec", "error", string(out))
