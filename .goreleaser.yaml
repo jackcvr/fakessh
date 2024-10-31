@@ -27,7 +27,7 @@ builds:
 
 upx:
   - enabled: true
-    compress: 3
+    compress: best
 
 archives:
   - format: tar.gz

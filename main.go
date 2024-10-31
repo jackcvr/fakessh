@@ -76,7 +76,7 @@ func main() {
 		start := time.Now()
 		defer func() {
 			_ = sess.Exit(0)
-			slog.Info("disconnected", "addr", sess.RemoteAddr(), "duration", time.Now().Sub(start))
+			slog.Info("disconnected", "addr", sess.RemoteAddr(), "duration", time.Now().Sub(start).String())
 		}()
 
 		ctx := sess.Context()
