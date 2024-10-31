@@ -104,12 +104,13 @@ func main() {
 			attempts[ip] = 0
 			if out, err := exec.Command("ufw", "deny", "from", ip).CombinedOutput(); err != nil {
 				slog.Error("exec", "error", string(out))
+			} else {
+				releaseCmd := fmt.Sprintf(`echo "ufw delete deny from %s" | at now + %s`, ip, config.JailDuration)
+				if out, err = exec.Command("/bin/sh", "-c", releaseCmd).CombinedOutput(); err != nil {
+					slog.Error("exec", "error", string(out))
+				}
+				slog.Info("jailed", "ip", ip, "term", config.JailDuration)
 			}
-			releaseCmd := fmt.Sprintf(`echo "ufw delete deny from %s" | at now + %s`, ip, config.JailDuration)
-			if out, err := exec.Command("/bin/sh", "-c", releaseCmd).CombinedOutput(); err != nil {
-				slog.Error("exec", "error", string(out))
-			}
-			slog.Info("jailed", "ip", ip, "term", config.JailDuration)
 		}
 
 		if cmd != "" {
