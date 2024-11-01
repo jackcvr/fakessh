@@ -33,7 +33,7 @@ var (
 		"uname": "Linux\n",
 	}
 	jailingReady = false
-	jailMutex    = sync.Mutex{}
+	connMutex    = sync.Mutex{}
 )
 
 type Config struct {
@@ -153,8 +153,8 @@ func main() {
 	slog.Info("listening", "addr", config.Bind)
 	slog.Error(ssh.ListenAndServe(config.Bind, nil,
 		ssh.WrapConn(func(ctx ssh.Context, conn net.Conn) net.Conn {
-			jailMutex.Lock()
-			defer jailMutex.Unlock()
+			connMutex.Lock()
+			defer connMutex.Unlock()
 			ip := strings.SplitN(conn.RemoteAddr().String(), ":", 2)[0]
 			slog.Info("accepted", "addr", conn.RemoteAddr())
 			if _, ok := attempts[ip]; !ok {
@@ -172,8 +172,11 @@ func main() {
 			}
 			attempts[ip] += 1
 			if jailingReady && attempts[ip] >= config.MaxAttempts && config.JailDuration != "" {
-				if jailIP(ip) {
+				if out, err := jailIP(ip); err != nil {
+					slog.Error("exec", "error", string(out))
+				} else {
 					attempts[ip] = 0
+					slog.Info("jailed", "ip", ip, "term", config.JailDuration)
 				}
 			}
 			return conn
@@ -231,19 +234,16 @@ func getIPInfo(ip string) (map[string]any, error) {
 	return data, nil
 }
 
-func jailIP(ip string) bool {
+func jailIP(ip string) ([]byte, error) {
 	if out, err := exec.Command("ufw", "deny", "from", ip).CombinedOutput(); err != nil {
-		slog.Error("exec", "error", string(out))
+		return out, err
 	} else {
 		releaseCmd := fmt.Sprintf(`echo "ufw delete deny from %s" | at now + %s`, ip, config.JailDuration)
 		if out, err = exec.Command("/bin/sh", "-c", releaseCmd).CombinedOutput(); err != nil {
-			slog.Error("exec", "error", string(out))
 			// releasing immediately due to the issues with un-jail scheduling
 			_ = exec.Command("ufw", "delete", "deny", "from", ip).Run()
-		} else {
-			slog.Info("jailed", "ip", ip, "term", config.JailDuration)
-			return true
+			return out, err
 		}
 	}
-	return false
+	return nil, nil
 }
