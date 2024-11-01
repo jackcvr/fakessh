@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -81,7 +82,7 @@ func main() {
 		ctx := sess.Context()
 		pw := ctx.Value("password")
 		cmd := sess.RawCommand()
-		slog.Info("connected", "addr", sess.RemoteAddr(), "user", ctx.User(), "password", pw, "cmd", cmd)
+		slog.Info("auth", "addr", sess.RemoteAddr(), "user", ctx.User(), "password", pw, "cmd", cmd)
 
 		ip := strings.SplitN(sess.RemoteAddr().String(), ":", 2)[0]
 		if _, ok := attempts[ip]; !ok {
@@ -161,6 +162,10 @@ func main() {
 
 	slog.Info("listening", "addr", config.Bind)
 	slog.Error(ssh.ListenAndServe(config.Bind, nil,
+		ssh.WrapConn(func(ctx ssh.Context, conn net.Conn) net.Conn {
+			slog.Info("accepted", "addr", conn.RemoteAddr())
+			return conn
+		}),
 		ssh.PasswordAuth(func(ctx ssh.Context, pw string) bool {
 			ctx.SetValue("password", pw)
 			return true
