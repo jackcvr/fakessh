@@ -113,8 +113,7 @@ func main() {
 		}
 
 		if cmd != "" {
-			cmd0 := sess.Command()[0]
-			resp := makeResponse(cmd0)
+			resp := makeResponse(cmd)
 			Try(sess.Write([]byte(resp)))
 			slog.Debug("cmd", "sent", resp)
 			return
@@ -174,8 +173,11 @@ func makeResponse(cmd string) string {
 	resp, ok := cmdResponses[list[0]]
 	if !ok {
 		if list[0] == "echo" {
-			resp = strings.ReplaceAll(list[1], "'", "")
-			resp = strings.ReplaceAll(resp, `"`, "") + "\n"
+			if len(list) > 1 {
+				resp = strings.ReplaceAll(list[1], "'", "")
+				resp = strings.ReplaceAll(resp, `"`, "")
+			}
+			resp += "\n"
 		} else {
 			resp = fmt.Sprintf("%s: command not found\n", cmd)
 		}
