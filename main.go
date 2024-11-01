@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -31,6 +32,8 @@ var (
 	cmdResponses = map[string]string{
 		"uname": "Linux\n",
 	}
+	jailingReady = false
+	jailMutex    = sync.Mutex{}
 )
 
 type Config struct {
@@ -49,6 +52,24 @@ var config = Config{
 	MaxAttempts:  3,
 	JailDuration: "1 day",
 	AbuseIPDBKey: "",
+}
+
+func init() {
+	out, err := exec.Command("ufw", "status").CombinedOutput()
+	if err != nil {
+		log.Printf("ufw is not available: %s", out)
+		return
+	} else {
+		if strings.TrimSpace(string(out)) == "Status: inactive" {
+			log.Print("ufw installed but is not active")
+		}
+	}
+	out, err = exec.Command("at", "-V").CombinedOutput()
+	if err != nil {
+		log.Printf("'at' command is not available: %s", out)
+	} else {
+		jailingReady = true
+	}
 }
 
 func main() {
@@ -80,49 +101,19 @@ func main() {
 		}()
 
 		ctx := sess.Context()
-		pw := ctx.Value("password")
 		cmd := sess.RawCommand()
-		slog.Info("auth", "addr", sess.RemoteAddr(), "user", ctx.User(), "password", pw, "cmd", cmd)
-
-		ip := strings.SplitN(sess.RemoteAddr().String(), ":", 2)[0]
-		if _, ok := attempts[ip]; !ok {
-			attempts[ip] = 0
-			if config.AbuseIPDBKey != "" {
-				go func() {
-					info, err := getIPInfo(ip)
-					if err != nil {
-						slog.Error(err.Error())
-						return
-					}
-					slog.Info("info", "ip", ip, "data", info["data"])
-				}()
-			}
-		}
-		attempts[ip] += 1
-
-		if attempts[ip] >= config.MaxAttempts && config.JailDuration != "" {
-			attempts[ip] = 0
-			if out, err := exec.Command("ufw", "deny", "from", ip).CombinedOutput(); err != nil {
-				slog.Error("exec", "error", string(out))
-			} else {
-				releaseCmd := fmt.Sprintf(`echo "ufw delete deny from %s" | at now + %s`, ip, config.JailDuration)
-				if out, err = exec.Command("/bin/sh", "-c", releaseCmd).CombinedOutput(); err != nil {
-					slog.Error("exec", "error", string(out))
-				}
-				slog.Info("jailed", "ip", ip, "term", config.JailDuration)
-			}
-		}
+		slog.Info("auth",
+			"addr", sess.RemoteAddr(),
+			"user", ctx.User(),
+			"password", ctx.Value("password"),
+			"cmd", cmd)
 
 		if cmd != "" {
 			resp := makeResponse(cmd)
 			Try(sess.Write([]byte(resp)))
-			slog.Debug("cmd", "sent", resp)
-			return
+			slog.Debug("output", "cmd", resp)
 		} else {
 			Try(sess.Write([]byte(WelcomeMessage + Prompt)))
-		}
-
-		if cmd == "" {
 			go func() {
 				defer Catch(func(err error) {
 					slog.Debug(err.Error())
@@ -149,21 +140,42 @@ func main() {
 					}
 				}
 			}()
-		}
-
-		timer := time.NewTimer(time.Duration(config.Timeout) * time.Second)
-		defer timer.Stop()
-		select {
-		case <-ctx.Done():
-			return
-		case <-timer.C:
+			timer := time.NewTimer(time.Duration(config.Timeout) * time.Second)
+			defer timer.Stop()
+			select {
+			case <-ctx.Done():
+				return
+			case <-timer.C:
+			}
 		}
 	})
 
 	slog.Info("listening", "addr", config.Bind)
 	slog.Error(ssh.ListenAndServe(config.Bind, nil,
 		ssh.WrapConn(func(ctx ssh.Context, conn net.Conn) net.Conn {
+			jailMutex.Lock()
+			defer jailMutex.Unlock()
+			ip := strings.SplitN(conn.RemoteAddr().String(), ":", 2)[0]
 			slog.Info("accepted", "addr", conn.RemoteAddr())
+			if _, ok := attempts[ip]; !ok {
+				attempts[ip] = 0
+				if config.AbuseIPDBKey != "" {
+					go func() {
+						info, err := getIPInfo(ip)
+						if err != nil {
+							slog.Error(err.Error())
+							return
+						}
+						slog.Info("info", "ip", ip, "data", info["data"])
+					}()
+				}
+			}
+			attempts[ip] += 1
+			if jailingReady && attempts[ip] >= config.MaxAttempts && config.JailDuration != "" {
+				if jailIP(ip) {
+					attempts[ip] = 0
+				}
+			}
 			return conn
 		}),
 		ssh.PasswordAuth(func(ctx ssh.Context, pw string) bool {
@@ -217,4 +229,21 @@ func getIPInfo(ip string) (map[string]any, error) {
 		return nil, err
 	}
 	return data, nil
+}
+
+func jailIP(ip string) bool {
+	if out, err := exec.Command("ufw", "deny", "from", ip).CombinedOutput(); err != nil {
+		slog.Error("exec", "error", string(out))
+	} else {
+		releaseCmd := fmt.Sprintf(`echo "ufw delete deny from %s" | at now + %s`, ip, config.JailDuration)
+		if out, err = exec.Command("/bin/sh", "-c", releaseCmd).CombinedOutput(); err != nil {
+			slog.Error("exec", "error", string(out))
+			// releasing immediately due to the issues with un-jail scheduling
+			_ = exec.Command("ufw", "delete", "deny", "from", ip).Run()
+		} else {
+			slog.Info("jailed", "ip", ip, "term", config.JailDuration)
+			return true
+		}
+	}
+	return false
 }
