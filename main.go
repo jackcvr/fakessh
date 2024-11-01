@@ -29,7 +29,6 @@ var (
 	configPath   = "/etc/fakessh/fakessh.toml"
 	cmdResponses = map[string]string{
 		"uname": "Linux\n",
-		"echo":  "SSH check\n",
 	}
 )
 
@@ -139,12 +138,11 @@ func main() {
 					Try(sess.Write(buf))
 					if buf[0] == 13 {
 						Try(sess.Write([]byte("\n")))
-						rawCmd := strings.TrimSpace(string(input))
+						cmd = strings.TrimSpace(string(input))
 						slog.Info("input",
 							"addr", sess.RemoteAddr(),
-							"cmd", rawCmd)
-						cmd0 := strings.SplitN(rawCmd, " ", 2)[0]
-						resp := makeResponse(cmd0)
+							"cmd", cmd)
+						resp := makeResponse(cmd)
 						Try(sess.Write([]byte(resp + Prompt)))
 						slog.Debug("output", "cmd", resp)
 						input = input[:0]
@@ -172,9 +170,15 @@ func main() {
 }
 
 func makeResponse(cmd string) string {
-	resp, ok := cmdResponses[cmd]
+	list := strings.SplitN(cmd, " ", 2)
+	resp, ok := cmdResponses[list[0]]
 	if !ok {
-		resp = fmt.Sprintf("%s: command not found\n", cmd)
+		if list[0] == "echo" {
+			resp = strings.ReplaceAll(list[1], "'", "")
+			resp = strings.ReplaceAll(resp, `"`, "") + "\n"
+		} else {
+			resp = fmt.Sprintf("%s: command not found\n", cmd)
+		}
 	}
 	return resp
 }
