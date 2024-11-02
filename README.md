@@ -5,16 +5,15 @@ and temporarily bans IPs after repeated attempts.
 
 ## Features
 
-- **Input Logging**: Logs all input from SSH sessions, including command usage and connection details.
-- **IP Blocking**: Limits connection attempts and jails IPs using `ufw`.
-- **AbuseIPDB Integration**: Gets extra IP information if an API key is provided.
-- **Configurable**: Uses a TOML config file to set server options.
+- **Input logging**: logs all input from SSH sessions, including command usage and connection details.
+- **IP blocking**: limits connection attempts and jails IPs using `ufw`.
+- **AbuseIPDB integration**: gets extra IP information if an API key is provided.
 
 ## Optional requirements
 
 For IP blocking and automatic unblocking, ensure these tools are installed:
-- **`ufw`**: Used to block IPs after repeated failed attempts.
-- **`at`**: Schedules automatic unblocking of jailed IPs based on configured jail duration.
+- **`ufw`**: used to block IPs after repeated attempts.
+- **`at`**: schedules automatic unblocking of jailed IPs based on configured jail duration.
 
 ### Preparation
 
