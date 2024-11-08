@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -235,11 +236,15 @@ func getIPInfo(ip string) (map[string]any, error) {
 }
 
 func jailIP(ip string) ([]byte, error) {
-	if out, err := exec.Command("ufw", "deny", "from", ip).CombinedOutput(); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if out, err := exec.CommandContext(ctx, "ufw", "deny", "from", ip).CombinedOutput(); err != nil {
 		return out, err
 	} else {
+		ctx, cancel = context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
 		releaseCmd := fmt.Sprintf(`echo "ufw delete deny from %s" | at now + %s`, ip, config.JailDuration)
-		if out, err = exec.Command("/bin/sh", "-c", releaseCmd).CombinedOutput(); err != nil {
+		if out, err = exec.CommandContext(ctx, "/bin/sh", "-c", releaseCmd).CombinedOutput(); err != nil {
 			// releasing immediately due to the issues with un-jail scheduling
 			_ = exec.Command("ufw", "delete", "deny", "from", ip).Run()
 			return out, err
