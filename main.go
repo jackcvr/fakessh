@@ -162,7 +162,9 @@ func main() {
 				attempts[ip] = 0
 				if config.AbuseIPDBKey != "" {
 					go func() {
-						info, err := getIPInfo(ip)
+						ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+						defer cancel()
+						info, err := getIPInfo(ctx, ip)
 						if err != nil {
 							slog.Error(err.Error())
 							return
@@ -206,10 +208,10 @@ func makeResponse(cmd string) string {
 	return resp
 }
 
-func getIPInfo(ip string) (map[string]any, error) {
+func getIPInfo(ctx context.Context, ip string) (map[string]any, error) {
 	client := &http.Client{}
 	url := fmt.Sprintf("%s?ipAddress=%s", APIURL, ip)
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
