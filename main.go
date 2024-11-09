@@ -33,7 +33,15 @@ var (
 	configPath  = "/etc/fakessh/fakessh.toml"
 	jailIsReady = false
 	connMutex   = sync.Mutex{}
+	httpClient  *http.Client
+	IPInfoPool  = sync.Pool{
+		New: func() any {
+			return new(IPInfo)
+		},
+	}
 )
+
+type IPInfo map[string]any
 
 type Config struct {
 	Verbose      bool   `toml:"verbose"`
@@ -167,20 +175,21 @@ func main() {
 						go func() {
 							ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 							defer cancel()
-							info, err := getIPInfo(ctx, ip)
-							if err != nil {
+							info := IPInfoPool.Get().(*IPInfo)
+							defer IPInfoPool.Put(info)
+							if err = getIPInfo(ctx, info, ip); err != nil {
 								slog.Error(err.Error())
 								return
 							}
-							slog.Info("info", "ip", ip, "data", info["data"])
+							slog.Info("info", "ip", ip, "data", (*info)["data"])
 						}()
 					}
 				}
 				attempts[ip] += 1
 				if attempts[ip] >= config.MaxAttempts && jailIsReady && config.JailDuration != "" {
 					defer delete(attempts, ip)
-					if out, err := jailIP(ip); err != nil {
-						slog.Error("exec", "error", string(out))
+					if info, err := jailIP(ip); err != nil {
+						slog.Error("exec", "error", string(info))
 					} else {
 						slog.Info("jailed", "ip", ip, "term", config.JailDuration)
 					}
@@ -195,33 +204,33 @@ func main() {
 	).Error())
 }
 
-func getIPInfo(ctx context.Context, ip string) (map[string]any, error) {
-	client := &http.Client{}
+func getIPInfo(ctx context.Context, data *IPInfo, ip string) error {
+	if httpClient == nil {
+		httpClient = &http.Client{}
+	}
 	url := fmt.Sprintf("%s?ipAddress=%s", APIURL, ip)
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	req.Header.Add("Accept", "application/json")
 	req.Header.Add("Key", config.AbuseIPDBKey)
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, errors.New(string(body))
+		return errors.New(string(body))
 	}
-
-	data := make(map[string]any)
-	if err = json.Unmarshal(body, &data); err != nil {
-		return nil, err
+	if err = json.Unmarshal(body, data); err != nil {
+		return err
 	}
-	return data, nil
+	return nil
 }
 
 func jailIP(ip string) ([]byte, error) {
