@@ -24,17 +24,15 @@ const (
 	APIURL         = "https://api.abuseipdb.com/api/v2/check"
 	Prompt         = "root@localhost:~# "
 	WelcomeMessage = "Welcome to Ubuntu 24.04.1 LTS (GNU/Linux 6.8.0-47-generic x86_64)\n\n"
+	JailCapacity   = 1000
 )
 
 var attempts = make(map[string]int)
 
 var (
-	configPath   = "/etc/fakessh/fakessh.toml"
-	cmdResponses = map[string]string{
-		"uname": "Linux\n",
-	}
-	jailingReady = false
-	connMutex    = sync.Mutex{}
+	configPath  = "/etc/fakessh/fakessh.toml"
+	jailIsReady = false
+	connMutex   = sync.Mutex{}
 )
 
 type Config struct {
@@ -69,7 +67,7 @@ func init() {
 	if err != nil {
 		log.Printf("'at' command is not available: %s", out)
 	} else {
-		jailingReady = true
+		jailIsReady = true
 	}
 }
 
@@ -110,7 +108,7 @@ func main() {
 			"cmd", cmd)
 
 		if cmd != "" {
-			resp := makeResponse(cmd)
+			resp := fmt.Sprintf("%s: command not found\n", cmd)
 			Try(sess.Write([]byte(resp)))
 			slog.Debug("output", "cmd", resp)
 		} else {
@@ -134,7 +132,7 @@ func main() {
 						slog.Info("input",
 							"addr", sess.RemoteAddr(),
 							"cmd", cmd)
-						resp := makeResponse(cmd)
+						resp := fmt.Sprintf("%s: command not found\n", cmd)
 						Try(sess.Write([]byte(resp + Prompt)))
 						slog.Debug("output", "cmd", resp)
 						input = input[:0]
@@ -156,30 +154,36 @@ func main() {
 		ssh.WrapConn(func(ctx ssh.Context, conn net.Conn) net.Conn {
 			connMutex.Lock()
 			defer connMutex.Unlock()
-			ip := strings.SplitN(conn.RemoteAddr().String(), ":", 2)[0]
 			slog.Info("accepted", "addr", conn.RemoteAddr())
-			if _, ok := attempts[ip]; !ok {
-				attempts[ip] = 0
-				if config.AbuseIPDBKey != "" {
-					go func() {
-						ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-						defer cancel()
-						info, err := getIPInfo(ctx, ip)
-						if err != nil {
-							slog.Error(err.Error())
-							return
-						}
-						slog.Info("info", "ip", ip, "data", info["data"])
-					}()
-				}
+			ip, _, err := net.SplitHostPort(conn.RemoteAddr().String())
+			if err != nil {
+				slog.Error(err.Error())
+				return conn
 			}
-			attempts[ip] += 1
-			if jailingReady && attempts[ip] >= config.MaxAttempts && config.JailDuration != "" {
-				if out, err := jailIP(ip); err != nil {
-					slog.Error("exec", "error", string(out))
-				} else {
+			if len(attempts) < JailCapacity {
+				if _, ok := attempts[ip]; !ok {
 					attempts[ip] = 0
-					slog.Info("jailed", "ip", ip, "term", config.JailDuration)
+					if config.AbuseIPDBKey != "" {
+						go func() {
+							ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+							defer cancel()
+							info, err := getIPInfo(ctx, ip)
+							if err != nil {
+								slog.Error(err.Error())
+								return
+							}
+							slog.Info("info", "ip", ip, "data", info["data"])
+						}()
+					}
+				}
+				attempts[ip] += 1
+				if attempts[ip] >= config.MaxAttempts && jailIsReady && config.JailDuration != "" {
+					defer delete(attempts, ip)
+					if out, err := jailIP(ip); err != nil {
+						slog.Error("exec", "error", string(out))
+					} else {
+						slog.Info("jailed", "ip", ip, "term", config.JailDuration)
+					}
 				}
 			}
 			return conn
@@ -189,23 +193,6 @@ func main() {
 			return true
 		}),
 	).Error())
-}
-
-func makeResponse(cmd string) string {
-	list := strings.SplitN(cmd, " ", 2)
-	resp, ok := cmdResponses[list[0]]
-	if !ok {
-		if list[0] == "echo" {
-			if len(list) > 1 {
-				resp = strings.ReplaceAll(list[1], "'", "")
-				resp = strings.ReplaceAll(resp, `"`, "")
-			}
-			resp += "\n"
-		} else {
-			resp = fmt.Sprintf("%s: command not found\n", cmd)
-		}
-	}
-	return resp
 }
 
 func getIPInfo(ctx context.Context, ip string) (map[string]any, error) {
